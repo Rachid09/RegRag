@@ -1,0 +1,29 @@
+[project]
+name = "regrag"
+version = "0.1.0"
+description = "Question answering with exact passage citations over ADGM financial regulation (ObliQA)."
+requires-python = ">=3.12"
+dependencies = [
+    "tenacity>=9.2,<10",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.8,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9,<10",
+    "ruff>=0.17,<0.18",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["data: needs the downloaded dataset in data/raw (run `uv run python -m regrag.download`)"]
