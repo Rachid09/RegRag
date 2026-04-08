@@ -7,6 +7,7 @@ file, so a rerun of ingestion or evaluation never pays for the same call twice.
 import hashlib
 import json
 import sqlite3
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -59,6 +60,11 @@ def is_rate_limited(exc: BaseException) -> bool:
     return getattr(exc, "status_code", None) == 429
 
 
+def _log_backoff(state) -> None:
+    wait = state.next_action.sleep if state.next_action else 0.0
+    print(f"  429 rate limited; retry {state.attempt_number} in {wait:.0f}s", file=sys.stderr)
+
+
 def retry_on_429(attempts: int = 8, max_wait: float = 120.0):
     """Exponential backoff with jitter on 429s; other errors propagate immediately."""
     return retry(
@@ -66,4 +72,5 @@ def retry_on_429(attempts: int = 8, max_wait: float = 120.0):
         wait=wait_random_exponential(multiplier=2, max=max_wait),
         stop=stop_after_attempt(attempts),
         reraise=True,
+        before_sleep=_log_backoff,
     )
