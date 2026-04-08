@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "litellm>=1.110.1,<1.111",
     "python-dotenv>=1.0,<2",
+    "qdrant-client>=1.20,<1.21",
     "tenacity>=9.2,<10",
 ]
 
