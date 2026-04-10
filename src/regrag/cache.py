@@ -62,7 +62,12 @@ def is_rate_limited(exc: BaseException) -> bool:
 
 def _log_backoff(state) -> None:
     wait = state.next_action.sleep if state.next_action else 0.0
-    print(f"  429 rate limited; retry {state.attempt_number} in {wait:.0f}s", file=sys.stderr)
+    exc = state.outcome.exception() if state.outcome else None
+    detail = " ".join(str(exc).split())[:400] if exc else ""
+    print(
+        f"  429 rate limited; retry {state.attempt_number} in {wait:.0f}s: {detail}",
+        file=sys.stderr,
+    )
 
 
 def retry_on_429(attempts: int = 8, max_wait: float = 120.0):
