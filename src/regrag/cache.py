@@ -63,7 +63,10 @@ def is_rate_limited(exc: BaseException) -> bool:
 def _log_backoff(state) -> None:
     wait = state.next_action.sleep if state.next_action else 0.0
     exc = state.outcome.exception() if state.outcome else None
-    detail = " ".join(str(exc).split())[:400] if exc else ""
+    detail = " ".join(str(exc).split()) if exc else ""
+    if "Quota exceeded for metric" in detail:  # Gemini names the exhausted quota here
+        detail = detail[detail.index("Quota exceeded for metric") :]
+    detail = detail[:300]
     print(
         f"  429 rate limited; retry {state.attempt_number} in {wait:.0f}s: {detail}",
         file=sys.stderr,
