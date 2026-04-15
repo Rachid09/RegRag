@@ -61,3 +61,14 @@ def test_retry_gives_up_after_attempts():
 
     with pytest.raises(FakeHTTPError):
         always_429()
+
+
+def test_daily_quota_429_is_not_retried():
+    from regrag.cache import is_rate_limited
+
+    minute = Exception("Quota exceeded: requests per minute")
+    minute.status_code = 429
+    daily = Exception("Embed content requests per day limit exceeded on Free Tier")
+    daily.status_code = 429
+    assert is_rate_limited(minute)
+    assert not is_rate_limited(daily)

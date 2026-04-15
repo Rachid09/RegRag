@@ -56,8 +56,14 @@ class DiskCache:
 
 
 def is_rate_limited(exc: BaseException) -> bool:
-    """True for HTTP 429 (LiteLLM's RateLimitError carries status_code=429)."""
-    return getattr(exc, "status_code", None) == 429
+    """True for a per-minute HTTP 429 (LiteLLM's RateLimitError carries status_code=429).
+
+    A daily quota (Gemini says "per day") resets hours later, so retrying for seconds is
+    pointless: it is not retried and the run stops; the cache lets it resume the next day.
+    """
+    if getattr(exc, "status_code", None) != 429:
+        return False
+    return "per day" not in str(exc).lower()
 
 
 def _log_backoff(state) -> None:
