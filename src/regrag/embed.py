@@ -103,6 +103,11 @@ class Embedder:
                 )
         return out  # type: ignore[return-value]
 
+    def is_cached(self, text: str) -> bool:
+        from regrag.cache import cache_key
+
+        return self.cache.get(cache_key("embed", self._key_payload(text))) is not None
+
     def embed_query(self, question: str) -> Vector:
         return self.embed([query_text(question)])[0]
 

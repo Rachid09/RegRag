@@ -100,5 +100,51 @@ def build_index(recreate: bool = False) -> None:
         raise RuntimeError(f"expected {len(chunks)} points, found {n}")
 
 
+def embed_pending(max_new: int) -> None:
+    """Embed at most max_new not-yet-cached chunks, for working within a daily free-tier quota.
+
+    Progress is cached per batch, so stopping (budget reached or daily 429) loses nothing.
+    """
+    from regrag.cache import is_rate_limited
+    from regrag.chunking import chunk_corpus
+    from regrag.corpus import load_corpus
+    from regrag.embed import Embedder
+
+    chunks = chunk_corpus(load_corpus())
+    emb = Embedder()
+    pending = [c.embed_text for c in chunks if not emb.is_cached(c.embed_text)]
+    try:
+        emb.embed(pending[:max_new], progress=True)
+    except Exception as exc:
+        if getattr(exc, "status_code", None) != 429 or is_rate_limited(exc):
+            raise
+        print("daily quota reached; stopping (progress is cached)", file=sys.stderr)
+    left = sum(1 for c in chunks if not emb.is_cached(c.embed_text))
+    days = -(-left // max_new) if max_new else 0
+    print(
+        f"cached={len(chunks) - left}/{len(chunks)} left={left} "
+        f"(~{days} more runs at {max_new}/day) requests={emb.requests_made} "
+        f"tokens={emb.tokens_used}"
+    )
+
+
+def main() -> None:
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Embed the corpus and load it into Qdrant.")
+    ap.add_argument("--recreate", action="store_true", help="drop and rebuild the collection")
+    ap.add_argument(
+        "--embed-only",
+        type=int,
+        metavar="MAX_NEW",
+        help="only embed up to MAX_NEW uncached chunks (free-tier daily runs), no Qdrant load",
+    )
+    args = ap.parse_args()
+    if args.embed_only is not None:
+        embed_pending(args.embed_only)
+    else:
+        build_index(recreate=args.recreate)
+
+
 if __name__ == "__main__":
-    build_index(recreate="--recreate" in sys.argv)
+    main()

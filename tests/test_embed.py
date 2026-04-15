@@ -79,3 +79,10 @@ def test_wrong_vector_count_raises(tmp_path):
 
     with pytest.raises(RuntimeError, match="asked for 2"):
         make(tmp_path, short).embed(["a", "b"])
+
+
+def test_is_cached(tmp_path):
+    e = make(tmp_path, FakeBackend())
+    assert not e.is_cached("a")
+    e.embed(["a"])
+    assert e.is_cached("a")
