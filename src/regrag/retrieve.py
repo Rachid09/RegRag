@@ -27,14 +27,23 @@ class Hit:
     headings: tuple[str, ...]
 
 
-def collapse(points: Iterable, n: int = N_PASSAGES) -> list[Hit]:
+def hit_from_point(p) -> Hit:
+    pl = p.payload
+    return Hit(
+        (pl["doc_id"], pl["passage_id"]),
+        p.score,
+        pl["text"],
+        pl["doc_title"],
+        tuple(pl["headings"]),
+    )
+
+
+def collapse(hits: Iterable[Hit], n: int = N_PASSAGES) -> list[Hit]:
     """Keep each passage's best-scoring window; return the top n passages by score."""
     best: dict[PassageKey, Hit] = {}
-    for p in points:
-        pl = p.payload
-        key = (pl["doc_id"], pl["passage_id"])
-        if key not in best or p.score > best[key].score:
-            best[key] = Hit(key, p.score, pl["text"], pl["doc_title"], tuple(pl["headings"]))
+    for h in hits:
+        if h.key not in best or h.score > best[h.key].score:
+            best[h.key] = h
     return sorted(best.values(), key=lambda h: h.score, reverse=True)[:n]
 
 
@@ -46,4 +55,4 @@ def dense_search(
     collection: str = config.COLLECTION,
 ) -> list[Hit]:
     res = client.query_points(collection, query=query_vector, limit=fetch, with_payload=True)
-    return collapse(res.points, n)
+    return collapse([hit_from_point(p) for p in res.points], n)

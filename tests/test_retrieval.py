@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from regrag.metrics import mean, recall_at_k, reciprocal_rank
-from regrag.retrieve import collapse
+from regrag.retrieve import collapse, hit_from_point
 
 A, B, C, D = (1, "1"), (1, "2"), (2, "1"), (3, "9")
 
@@ -40,6 +40,6 @@ def point(key, score, window=0):
 
 def test_collapse_keeps_best_window_per_passage_and_caps_n():
     pts = [point(A, 0.9, 0), point(B, 0.8), point(A, 0.95, 1), point(C, 0.7)]
-    hits = collapse(pts, n=2)
+    hits = collapse([hit_from_point(p) for p in pts], n=2)
     assert [h.key for h in hits] == [A, B]
     assert hits[0].score == 0.95
