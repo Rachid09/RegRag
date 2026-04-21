@@ -1,8 +1,10 @@
 """Retrieval eval: Recall@k and MRR@20 on a fixed random sample of test questions.
 
-    uv run python -m regrag.eval_retrieval            # 300 questions, seed 42
+    uv run python -m regrag.eval_retrieval --method bm25    # 300 test questions, seed 42
+    uv run python -m regrag.eval_retrieval --method dense   # needs the full Qdrant index
 
-Questions are embedded in batches through the cached Embedder, so a rerun makes no API calls.
+Dense: questions are embedded in batches through the cached Embedder, so a rerun makes no API
+calls. BM25 runs locally and makes none at all.
 Writes reports/retrieval_<method>.md (table) and .json (per-question ranks, for later analysis).
 """
 
@@ -47,14 +49,32 @@ def run_dense(items: list[QAItem]) -> list[list]:
     return [[h.key for h in dense_search(client, v)] for v in vectors]
 
 
+def run_bm25(items: list[QAItem]) -> list[list]:
+    from regrag.bm25 import build_bm25
+
+    index = build_bm25()
+    return [[h.key for h in index.search(q.question)] for q in items]
+
+
+METHODS = {"dense": run_dense, "bm25": run_bm25}
+SETUP = {
+    "dense": f"embedding model `{config.EMBED_MODEL}` ({config.EMBED_DIMS} dims), "
+    f"collection `{config.COLLECTION}`",
+    "bm25": "rank-bm25 BM25Okapi (k1=1.5, b=0.75), index text = title + headings + passage",
+}
+
+
 def write_report(method: str, split: str, n: int, seed: int, metrics: dict, rankings, items):
     REPORTS.mkdir(exist_ok=True)
-    cmd = f"uv run python -m regrag.eval_retrieval --split {split} --n {n} --seed {seed}"
+    cmd = (
+        f"uv run python -m regrag.eval_retrieval --method {method} "
+        f"--split {split} --n {n} --seed {seed}"
+    )
     lines = [
         f"# Retrieval eval: {method}",
         "",
-        f"Split `{split}`, {n} questions sampled with seed {seed}, embedding model "
-        f"`{config.EMBED_MODEL}` ({config.EMBED_DIMS} dims), collection `{config.COLLECTION}`.",
+        f"Split `{split}`, {n} questions sampled with seed {seed}; {SETUP[method]}.",
+        "Each question keeps its top 20 passages (50 chunks fetched, windows merged).",
         f"Reproduce: `{cmd}`",
         "",
         "| metric | value |",
@@ -81,14 +101,15 @@ def write_report(method: str, split: str, n: int, seed: int, metrics: dict, rank
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--method", choices=sorted(METHODS), default="dense")
     ap.add_argument("--split", default="test")
     ap.add_argument("--n", type=int, default=300)
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
     items = sample_questions(args.split, args.n, args.seed)
-    rankings = run_dense(items)
+    rankings = METHODS[args.method](items)
     metrics = score(rankings, items)
-    write_report("dense", args.split, args.n, args.seed, metrics, rankings, items)
+    write_report(args.method, args.split, args.n, args.seed, metrics, rankings, items)
     for k, v in metrics.items():
         print(f"{k:>10}  {v:.4f}")
 
