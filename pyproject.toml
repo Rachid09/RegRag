@@ -4,11 +4,13 @@ version = "0.1.0"
 description = "Question answering with exact passage citations over ADGM financial regulation (ObliQA)."
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.165,<0.166",
     "litellm>=1.110.1,<1.111",
     "python-dotenv>=1.0,<2",
     "qdrant-client>=1.20,<1.21",
     "rank-bm25>=0.2.2,<0.3",
     "tenacity>=9.2,<10",
+    "uvicorn[standard]>=0.54,<0.55",
 ]
 
 [build-system]
@@ -17,6 +19,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28,<0.29",
     "pytest>=9,<10",
     "ruff>=0.17,<0.18",
 ]

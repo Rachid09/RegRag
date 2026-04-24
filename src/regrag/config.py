@@ -37,3 +37,8 @@ LOCAL_MODELS = {
         "query_prefix": "search_query: ",
     },
 }
+
+# Chat API: which retriever answers questions. "bm25" needs nothing but the corpus; "hybrid"
+# also needs the local model's Qdrant collection to be built and Ollama to be running.
+API_RETRIEVER = os.environ.get("REGRAG_API_RETRIEVER", "bm25")
+API_LOCAL_MODEL = os.environ.get("REGRAG_API_LOCAL_MODEL", "nomic-embed-text")

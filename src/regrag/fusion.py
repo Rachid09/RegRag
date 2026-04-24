@@ -28,9 +28,14 @@ def rrf(rankings: Sequence[Sequence[Hit]], n: int = N_PASSAGES, k: int = RRF_K) 
     return sorted(fused, key=lambda h: h.score, reverse=True)[:n]
 
 
-def hybrid_search(client, bm25_index, question: str, query_vector, n: int = N_PASSAGES):
+def hybrid_search(
+    client, bm25_index, question: str, query_vector, n: int = N_PASSAGES, collection=None
+):
+    from regrag import config
     from regrag.retrieve import dense_search
 
-    dense = dense_search(client, query_vector, n=FUSE_DEPTH)
+    dense = dense_search(
+        client, query_vector, n=FUSE_DEPTH, collection=collection or config.COLLECTION
+    )
     sparse = bm25_index.search(question, n=FUSE_DEPTH)
     return rrf([dense, sparse], n=n)
