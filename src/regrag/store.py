@@ -76,23 +76,28 @@ def upsert_chunks(
             print(f"  upserted {min(end, len(chunks))}/{len(chunks)}", file=sys.stderr)
 
 
-def build_index(recreate: bool = False) -> None:
-    """Load, chunk, embed (cache first) and upsert the whole corpus. Safe to rerun."""
+def build_index(recreate: bool = False, local_model: str | None = None) -> None:
+    """Load, chunk, embed (cache first) and upsert the whole corpus. Safe to rerun.
+
+    local_model selects an entry from config.LOCAL_MODELS (Ollama, no quota, no cost) instead
+    of the hosted Gemini model; each model gets its own collection (embed.collection_for).
+    """
     from regrag.chunking import chunk_corpus
     from regrag.corpus import load_corpus
-    from regrag.embed import Embedder
+    from regrag.embed import collection_for, make_embedder
 
     passages = {p.key: p for p in load_corpus()}
     chunks = chunk_corpus(list(passages.values()))
-    emb = Embedder()
-    vectors = emb.embed([c.embed_text for c in chunks], progress=True)
+    emb = make_embedder(local_model)
+    collection = collection_for(local_model)
+    vectors = emb.embed_documents([c.embed_text for c in chunks], progress=True)
     payloads = [payload_for(c, passages[c.key].doc_title, passages[c.key].headings) for c in chunks]
     client = connect()
-    ensure_collection(client, config.COLLECTION, emb.dims, recreate=recreate)
-    upsert_chunks(client, config.COLLECTION, chunks, vectors, payloads, progress=True)
-    n = client.count(config.COLLECTION, exact=True).count
+    ensure_collection(client, collection, emb.dims, recreate=recreate)
+    upsert_chunks(client, collection, chunks, vectors, payloads, progress=True)
+    n = client.count(collection, exact=True).count
     print(
-        f"collection={config.COLLECTION} points={n} chunks={len(chunks)} "
+        f"collection={collection} points={n} chunks={len(chunks)} "
         f"passages={len(passages)} new_embed_requests={emb.requests_made} "
         f"new_embed_tokens={emb.tokens_used}"
     )
@@ -112,14 +117,14 @@ def embed_pending(max_new: int) -> None:
 
     chunks = chunk_corpus(load_corpus())
     emb = Embedder()
-    pending = [c.embed_text for c in chunks if not emb.is_cached(c.embed_text)]
+    pending = [c.embed_text for c in chunks if not emb.is_cached(emb.doc_text(c.embed_text))]
     try:
-        emb.embed(pending[:max_new], progress=True)
+        emb.embed_documents(pending[:max_new], progress=True)
     except Exception as exc:
         if getattr(exc, "status_code", None) != 429 or is_rate_limited(exc):
             raise
         print("daily quota reached; stopping (progress is cached)", file=sys.stderr)
-    left = sum(1 for c in chunks if not emb.is_cached(c.embed_text))
+    left = sum(1 for c in chunks if not emb.is_cached(emb.doc_text(c.embed_text)))
     days = -(-left // max_new) if max_new else 0
     print(
         f"cached={len(chunks) - left}/{len(chunks)} left={left} "
@@ -139,11 +144,16 @@ def main() -> None:
         metavar="MAX_NEW",
         help="only embed up to MAX_NEW uncached chunks (free-tier daily runs), no Qdrant load",
     )
+    ap.add_argument(
+        "--local-model",
+        choices=sorted(config.LOCAL_MODELS),
+        help="use a local Ollama model instead of the hosted Gemini model",
+    )
     args = ap.parse_args()
     if args.embed_only is not None:
         embed_pending(args.embed_only)
     else:
-        build_index(recreate=args.recreate)
+        build_index(recreate=args.recreate, local_model=args.local_model)
 
 
 if __name__ == "__main__":

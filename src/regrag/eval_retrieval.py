@@ -3,6 +3,8 @@
     uv run python -m regrag.eval_retrieval --method bm25    # 300 test questions, seed 42
     uv run python -m regrag.eval_retrieval --method dense   # needs the full Qdrant index
     uv run python -m regrag.eval_retrieval --method hybrid  # RRF of dense + BM25
+    uv run python -m regrag.eval_retrieval --method dense --local-model nomic-embed-text
+        # compares a local Ollama model instead of the hosted Gemini model (see config.LOCAL_MODELS)
 
 Dense: questions are embedded in batches through the cached Embedder, so a rerun makes no API
 calls. BM25 runs locally and makes none at all.
@@ -17,7 +19,7 @@ from pathlib import Path
 
 from regrag import config
 from regrag.corpus import QAItem, load_split
-from regrag.embed import Embedder, query_text
+from regrag.embed import collection_for, make_embedder
 from regrag.fusion import FUSE_DEPTH, RRF_K, rrf
 from regrag.metrics import mean, recall_at_k, reciprocal_rank
 from regrag.retrieve import N_PASSAGES, Hit, dense_search
@@ -45,11 +47,12 @@ def score(rankings: list[list], items: list[QAItem]) -> dict:
     return out
 
 
-def dense_hits(items: list[QAItem], n: int) -> list[list[Hit]]:
-    emb = Embedder()
-    vectors = emb.embed([query_text(q.question) for q in items], progress=True)
+def dense_hits(items: list[QAItem], n: int, local_model: str | None = None) -> list[list[Hit]]:
+    emb = make_embedder(local_model)
+    vectors = emb.embed_queries([q.question for q in items], progress=True)
     client = connect()
-    return [dense_search(client, v, n=n) for v in vectors]
+    collection = collection_for(local_model)
+    return [dense_search(client, v, n=n, collection=collection) for v in vectors]
 
 
 def bm25_hits(items: list[QAItem], n: int) -> list[list[Hit]]:
@@ -63,39 +66,68 @@ def keys(hit_lists: list[list[Hit]]) -> list[list]:
     return [[h.key for h in hs] for hs in hit_lists]
 
 
-def run_dense(items: list[QAItem]) -> list[list]:
-    return keys(dense_hits(items, N_PASSAGES))
+def run_dense(items: list[QAItem], local_model: str | None = None) -> list[list]:
+    return keys(dense_hits(items, N_PASSAGES, local_model))
 
 
-def run_bm25(items: list[QAItem]) -> list[list]:
+def run_bm25(items: list[QAItem], local_model: str | None = None) -> list[list]:
     return keys(bm25_hits(items, N_PASSAGES))
 
 
-def run_hybrid(items: list[QAItem]) -> list[list]:
-    dense, sparse = dense_hits(items, FUSE_DEPTH), bm25_hits(items, FUSE_DEPTH)
+def run_hybrid(items: list[QAItem], local_model: str | None = None) -> list[list]:
+    dense = dense_hits(items, FUSE_DEPTH, local_model)
+    sparse = bm25_hits(items, FUSE_DEPTH)
     return keys([rrf([d, s]) for d, s in zip(dense, sparse, strict=True)])
 
 
 METHODS = {"dense": run_dense, "bm25": run_bm25, "hybrid": run_hybrid}
-SETUP = {
-    "dense": f"embedding model `{config.EMBED_MODEL}` ({config.EMBED_DIMS} dims), "
-    f"collection `{config.COLLECTION}`",
-    "bm25": "rank-bm25 BM25Okapi (k1=1.5, b=0.75), index text = title + headings + passage",
-    "hybrid": f"Reciprocal Rank Fusion (k={RRF_K}) of the dense and BM25 rankings, "
-    f"top {FUSE_DEPTH} passages from each",
-}
 
 
-def write_report(method: str, split: str, n: int, seed: int, metrics: dict, rankings, items):
+def setup_for(method: str, local_model: str | None) -> str:
+    if method == "bm25":
+        return "rank-bm25 BM25Okapi (k1=1.5, b=0.75), index text = title + headings + passage"
+    if local_model is None:
+        model_desc = f"embedding model `{config.EMBED_MODEL}` ({config.EMBED_DIMS} dims)"
+    else:
+        spec = config.LOCAL_MODELS[local_model]
+        model_desc = f"local Ollama model `{spec['model']}` ({spec['dims']} dims)"
+    collection = collection_for(local_model)
+    if method == "dense":
+        return f"{model_desc}, collection `{collection}`"
+    return (
+        f"Reciprocal Rank Fusion (k={RRF_K}) of the dense ({model_desc}) and BM25 rankings, "
+        f"top {FUSE_DEPTH} passages from each"
+    )
+
+
+def report_name(method: str, local_model: str | None) -> str:
+    suffix = "" if local_model is None else f"_{local_model.replace('-', '_')}"
+    return f"retrieval_{method}{suffix}"
+
+
+def write_report(
+    method: str,
+    split: str,
+    n: int,
+    seed: int,
+    metrics: dict,
+    rankings,
+    items,
+    local_model: str | None = None,
+) -> str:
     REPORTS.mkdir(exist_ok=True)
+    name = report_name(method, local_model)
     cmd = (
         f"uv run python -m regrag.eval_retrieval --method {method} "
         f"--split {split} --n {n} --seed {seed}"
     )
+    if local_model is not None:
+        cmd += f" --local-model {local_model}"
+    setup = setup_for(method, local_model)
     lines = [
-        f"# Retrieval eval: {method}",
+        f"# Retrieval eval: {name}",
         "",
-        f"Split `{split}`, {n} questions sampled with seed {seed}; {SETUP[method]}.",
+        f"Split `{split}`, {n} questions sampled with seed {seed}; {setup}.",
         "Each question keeps its top 20 passages (50 chunks fetched, windows merged).",
         f"Reproduce: `{cmd}`",
         "",
@@ -104,7 +136,7 @@ def write_report(method: str, split: str, n: int, seed: int, metrics: dict, rank
         *[f"| {k} | {v:.4f} |" for k, v in metrics.items()],
         "",
     ]
-    (REPORTS / f"retrieval_{method}.md").write_text("\n".join(lines))
+    (REPORTS / f"{name}.md").write_text("\n".join(lines))
     per_q = [
         {
             "qid": q.qid,
@@ -114,23 +146,21 @@ def write_report(method: str, split: str, n: int, seed: int, metrics: dict, rank
         }
         for r, q in zip(rankings, items, strict=True)
     ]
-    (REPORTS / f"retrieval_{method}.json").write_text(
+    (REPORTS / f"{name}.json").write_text(
         json.dumps(
             {"split": split, "n": n, "seed": seed, "metrics": metrics, "questions": per_q}, indent=1
         )
     )
+    return name
 
 
 def write_ablation(split: str, n: int, seed: int) -> Path:
-    """One table of every method already evaluated on this exact sample (no reruns)."""
+    """One table of every report already written for this exact sample (no reruns)."""
     rows = []
-    for method in ("dense", "bm25", "hybrid"):
-        path = REPORTS / f"retrieval_{method}.json"
-        if not path.exists():
-            continue
+    for path in sorted(REPORTS.glob("retrieval_*.json")):
         data = json.loads(path.read_text())
         if (data["split"], data["n"], data["seed"]) == (split, n, seed):
-            rows.append((method, data["metrics"]))
+            rows.append((path.stem.removeprefix("retrieval_"), data["metrics"]))
     header = list(rows[0][1]) if rows else []
     lines = [
         "# Retrieval ablation",
@@ -138,7 +168,7 @@ def write_ablation(split: str, n: int, seed: int) -> Path:
         f"Split `{split}`, {n} questions sampled with seed {seed}; same questions for every row.",
         "Rows appear once `uv run python -m regrag.eval_retrieval --method <m>` has been run.",
         "",
-        "| method | " + " | ".join(header) + " |",
+        "| run | " + " | ".join(header) + " |",
         "|---|" + "---|" * len(header),
         *[f"| {m} | " + " | ".join(f"{v:.4f}" for v in met.values()) + " |" for m, met in rows],
         "",
@@ -154,11 +184,18 @@ def main() -> None:
     ap.add_argument("--split", default="test")
     ap.add_argument("--n", type=int, default=300)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument(
+        "--local-model",
+        choices=sorted(config.LOCAL_MODELS),
+        help="use a local Ollama model instead of the hosted Gemini model (dense/hybrid only)",
+    )
     args = ap.parse_args()
     items = sample_questions(args.split, args.n, args.seed)
-    rankings = METHODS[args.method](items)
+    rankings = METHODS[args.method](items, args.local_model)
     metrics = score(rankings, items)
-    write_report(args.method, args.split, args.n, args.seed, metrics, rankings, items)
+    write_report(
+        args.method, args.split, args.n, args.seed, metrics, rankings, items, args.local_model
+    )
     write_ablation(args.split, args.n, args.seed)
     for k, v in metrics.items():
         print(f"{k:>10}  {v:.4f}")

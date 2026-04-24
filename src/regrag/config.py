@@ -21,3 +21,19 @@ EMBED_RPM = int(os.environ.get("REGRAG_EMBED_RPM", "3"))  # 75 texts/min < free 
 # Vector store (Qdrant in Docker, see docker-compose.yml)
 QDRANT_URL = os.environ.get("REGRAG_QDRANT_URL", "http://localhost:6333")
 COLLECTION = os.environ.get("REGRAG_COLLECTION", "obliqa_dense")
+
+# Local embedding models (Ollama in Docker, see docker-compose.yml). Free, no quota, no cost,
+# run entirely on this machine; used to compare against the hosted Gemini model above. Each
+# gets its own Qdrant collection (name = key) since dims differ and vectors are not comparable
+# across models.
+OLLAMA_URL = os.environ.get("REGRAG_OLLAMA_URL", "http://localhost:11434")
+# nomic-embed-text must be given a task prefix (model card: "search_document: " for passages,
+# "search_query: " for questions). Only models with a verified prefix are listed.
+LOCAL_MODELS = {
+    "nomic-embed-text": {
+        "model": "ollama/nomic-embed-text",
+        "dims": 768,
+        "doc_prefix": "search_document: ",
+        "query_prefix": "search_query: ",
+    },
+}

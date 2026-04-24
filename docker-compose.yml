@@ -6,3 +6,12 @@ services:
     volumes:
       - ./data/qdrant:/qdrant/storage
     restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.40.17
+    cpus: 2  # keep the laptop usable; Docker on macOS has no GPU, so this is CPU-only
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ./data/ollama:/root/.ollama
+    restart: unless-stopped
