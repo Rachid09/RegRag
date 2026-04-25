@@ -42,3 +42,16 @@ LOCAL_MODELS = {
 # also needs the local model's Qdrant collection to be built and Ollama to be running.
 API_RETRIEVER = os.environ.get("REGRAG_API_RETRIEVER", "bm25")
 API_LOCAL_MODEL = os.environ.get("REGRAG_API_LOCAL_MODEL", "nomic-embed-text")
+
+# Answer generation (hosted Gemini via LiteLLM). "cheap" answers; "strong" is the judge in
+# phase 5 and can also answer. No temperature: Gemini 3.6+ ignores it (decision 19).
+GEN_MODELS = {
+    "cheap": os.environ.get("REGRAG_GEN_MODEL_CHEAP", "gemini/gemini-3.5-flash-lite"),
+    "strong": os.environ.get("REGRAG_GEN_MODEL_STRONG", "gemini/gemini-3.8-flash"),
+}
+GEN_MODEL = os.environ.get("REGRAG_GEN_MODEL", "cheap")
+CONTEXT_PASSAGES = 5  # retrieved passages shown to the model and cited as [1]..[5]
+# Refuse without calling the model when the best BM25 score is below this. Clearly off-topic
+# questions score under ~10, real ones over ~15 (dev sample); tuned in phase 5.
+MIN_RETRIEVAL_SCORE = float(os.environ.get("REGRAG_MIN_RETRIEVAL_SCORE", "10"))
+API_RATE_LIMIT = int(os.environ.get("REGRAG_API_RATE_LIMIT", "10"))  # questions/minute per client

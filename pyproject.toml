@@ -5,6 +5,7 @@ description = "Question answering with exact passage citations over ADGM financi
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.165,<0.166",
+    "langgraph>=1.2,<1.3",
     "litellm>=1.110.1,<1.111",
     "python-dotenv>=1.0,<2",
     "qdrant-client>=1.20,<1.21",

@@ -8,6 +8,7 @@ import hashlib
 import json
 import sqlite3
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -30,19 +31,26 @@ def cache_key(namespace: str, payload: Any) -> str:
 class DiskCache:
     def __init__(self, path: Path = CACHE_PATH):
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(path)
-        self._db.execute("CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)")
+        # the API answers in worker threads, so one connection is shared behind a lock;
+        # timeout lets a second process (an eval run next to the server) wait for the file lock
+        self._db = sqlite3.connect(path, check_same_thread=False, timeout=30)
+        self._lock = threading.Lock()
+        with self._lock:
+            self._db.execute("CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT)")
 
     def get(self, key: str) -> Any | None:
-        row = self._db.execute("SELECT value FROM cache WHERE key = ?", (key,)).fetchone()
+        with self._lock:
+            row = self._db.execute("SELECT value FROM cache WHERE key = ?", (key,)).fetchone()
         return None if row is None else json.loads(row[0])
 
     def set(self, key: str, value: Any) -> None:
-        self._db.execute("INSERT OR REPLACE INTO cache VALUES (?, ?)", (key, json.dumps(value)))
-        self._db.commit()
+        with self._lock:
+            self._db.execute("INSERT OR REPLACE INTO cache VALUES (?, ?)", (key, json.dumps(value)))
+            self._db.commit()
 
     def __len__(self) -> int:
-        return self._db.execute("SELECT COUNT(*) FROM cache").fetchone()[0]
+        with self._lock:
+            return self._db.execute("SELECT COUNT(*) FROM cache").fetchone()[0]
 
     def cached(self, namespace: str, payload: Any, compute: Callable[[], Any]) -> Any:
         """Return the cached value for (namespace, payload), or compute, store and return it."""
@@ -70,11 +78,12 @@ def _log_backoff(state) -> None:
     wait = state.next_action.sleep if state.next_action else 0.0
     exc = state.outcome.exception() if state.outcome else None
     detail = " ".join(str(exc).split()) if exc else ""
+    status = getattr(exc, "status_code", "error")
     if "Quota exceeded for metric" in detail:  # Gemini names the exhausted quota here
         detail = detail[detail.index("Quota exceeded for metric") :]
     detail = detail[:300]
     print(
-        f"  429 rate limited; retry {state.attempt_number} in {wait:.0f}s: {detail}",
+        f"  {status} from provider; retry {state.attempt_number} in {wait:.0f}s: {detail}",
         file=sys.stderr,
     )
 

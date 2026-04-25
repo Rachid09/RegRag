@@ -72,3 +72,13 @@ def test_daily_quota_429_is_not_retried():
     daily.status_code = 429
     assert is_rate_limited(minute)
     assert not is_rate_limited(daily)
+
+
+def test_cache_works_across_threads(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    c = DiskCache(tmp_path / "t.sqlite")
+    with ThreadPoolExecutor(4) as pool:
+        list(pool.map(lambda i: c.set(f"k{i}", i), range(50)))
+    with ThreadPoolExecutor(4) as pool:
+        assert list(pool.map(lambda i: c.get(f"k{i}"), range(50))) == list(range(50))
