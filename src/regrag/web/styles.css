@@ -107,6 +107,20 @@ body {
 }
 .answer { white-space: pre-wrap; overflow-wrap: anywhere; }
 .answer.error { color: var(--danger); }
+.answer.refused, .answer.notice {
+  padding: 10px 14px;
+  border: 1px dashed var(--line); border-radius: var(--radius);
+  color: var(--muted);
+}
+.cite-mark {
+  display: inline-grid; place-items: center;
+  min-width: 18px; height: 18px; padding: 0 5px; margin: 0 1px;
+  vertical-align: 2px;
+  border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 11px; font-weight: 650; text-decoration: none;
+}
+.cite-mark:hover { background: var(--accent); color: var(--bg); }
 .thinking { color: var(--muted); animation: pulse 1.4s ease-in-out infinite; }
 
 .sources { margin-top: 14px; }
@@ -138,6 +152,10 @@ body {
   white-space: pre-wrap; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
+.source.cited { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.source.uncited { opacity: .62; }
+.source.flash { box-shadow: 0 0 0 3px var(--accent-soft); opacity: 1; }
+.source { scroll-margin: 90px; transition: box-shadow .3s, opacity .2s; }
 .source.open .excerpt { -webkit-line-clamp: unset; display: block; }
 .more {
   margin: 6px 0 0 32px; padding: 0;

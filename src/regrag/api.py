@@ -2,35 +2,40 @@
 
     uv run uvicorn regrag.api:create_app --factory --port 8000   # open http://localhost:8000
 
-GET  /health  -> which retriever is loaded and whether it is ready
-POST /ask     -> Server-Sent Events stream: `sources`, then `token`s, then `done` (or `error`)
+GET  /health  -> retriever and answer model in use
+POST /ask     -> Server-Sent Events: `sources`, then `token`s, then `done` (or `error`)
 GET  /        -> the chat page (static files in regrag/web)
 
-The answer pipeline (phase 4) is not built yet, so /ask streams the retrieved passages and a
-short notice through the same events the real answer will use; the page will not change.
+/ask runs the LangGraph pipeline (regrag.graph). The answer is verified before it is streamed,
+so a citation the model invented never reaches the page. If the model is unavailable (daily
+quota, provider outage) the page still gets the retrieved passages with a short notice.
 """
 
 import json
 import logging
+import time
+from collections import defaultdict, deque
 from collections.abc import Callable, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from regrag import config
+from regrag.graph import answer, build_graph
+from regrag.llm import LLM, make_llm
 from regrag.retrieve import Hit
 
 log = logging.getLogger("regrag.api")
 WEB_DIR = Path(__file__).parent / "web"
-N_SOURCES = 5  # passages shown under an answer
-PENDING_ANSWER = (
-    "Answer generation is not connected yet, so here are the passages most relevant to your "
-    "question. Each one is cited by document and passage number."
+FALLBACK_NOTICE = (
+    "The answer service is unavailable right now, so here are the passages most relevant to "
+    "your question, each cited by document and passage number."
 )
 
 Search = Callable[[str], list[Hit]]
@@ -38,6 +43,7 @@ Search = Callable[[str], list[Hit]]
 
 class AskRequest(BaseModel):
     question: str = Field(min_length=3, max_length=1000)
+    model: Literal["cheap", "strong"] | None = None
 
 
 def sse(event: str, data) -> str:
@@ -76,37 +82,127 @@ def make_search(name: str) -> Search:
     raise ValueError(f"unknown retriever {name!r}")
 
 
-def create_app(search: Search | None = None, retriever: str = config.API_RETRIEVER) -> FastAPI:
+class RateLimiter:
+    """At most `limit` requests per client per `window` seconds (in memory, one process)."""
+
+    def __init__(self, limit: int, window: float = 60.0):
+        self.limit, self.window = limit, window
+        self.seen: dict[str, deque] = defaultdict(deque)
+
+    def allow(self, client: str) -> bool:
+        now = time.monotonic()
+        q = self.seen[client]
+        while q and now - q[0] > self.window:
+            q.popleft()
+        if len(q) >= self.limit:
+            return False
+        q.append(now)
+        return True
+
+
+def create_app(
+    search: Search | None = None,
+    llms: dict[str, LLM] | None = None,
+    retriever: str = config.API_RETRIEVER,
+    rate_limit: int = config.API_RATE_LIMIT,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.search = search or await run_in_threadpool(make_search, retriever)
+        models = llms or {name: make_llm(name) for name in config.GEN_MODELS}
+        app.state.graphs = {name: build_graph(app.state.search, m) for name, m in models.items()}
+        app.state.models = {name: m.model for name, m in models.items()}
         yield
 
+    if not log.handlers:  # one JSON line per question, next to uvicorn's own logs
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(message)s"))
+        log.addHandler(handler)
+        log.setLevel(logging.INFO)
+        log.propagate = False
+
     app = FastAPI(title="RegRAG", lifespan=lifespan)
+    limiter = RateLimiter(rate_limit)
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; "
+            "frame-ancestors 'none'"
+        )
+        return response
 
     @app.get("/health")
     def health() -> dict:
-        return {"status": "ok", "retriever": retriever, "answers": "retrieval-only"}
+        return {
+            "status": "ok",
+            "retriever": retriever,
+            "model": app.state.models[config.GEN_MODEL],
+        }
 
     @app.post("/ask")
-    async def ask(req: AskRequest) -> StreamingResponse:
-        question = req.question.strip()
+    async def ask(req: AskRequest, request: Request) -> StreamingResponse:
+        client = request.client.host if request.client else "unknown"
+        if not limiter.allow(client):
+            raise HTTPException(429, "Too many questions. Please wait a minute and try again.")
+        name = req.model or config.GEN_MODEL
+        started = time.monotonic()
+        state, fallback_hits, failed = None, None, False
         try:
-            hits = await run_in_threadpool(app.state.search, question)
+            state = await run_in_threadpool(answer, app.state.graphs[name], req.question)
         except Exception:
-            log.exception("retrieval failed")
-            hits = None
+            log.exception("answer pipeline failed; falling back to retrieval only")
+            try:
+                fallback_hits = await run_in_threadpool(app.state.search, req.question)
+            except Exception:
+                log.exception("retrieval failed")
+                failed = True
 
         def events() -> Iterator[str]:
-            if hits is None:
+            if failed:
                 yield sse("error", {"message": "Search failed. Please try again."})
                 return
-            sources = [source_json(i, h) for i, h in enumerate(hits[:N_SOURCES], start=1)]
-            yield sse("sources", sources)
-            for word in PENDING_ANSWER.split(" "):
-                yield sse("token", word + " ")
-            yield sse("done", {"retriever": retriever})
+            if state is None:  # model unavailable: passages only
+                hits = fallback_hits[: config.CONTEXT_PASSAGES]
+                yield sse("sources", [source_json(i, h) for i, h in enumerate(hits, start=1)])
+                for word in FALLBACK_NOTICE.split(" "):
+                    yield sse("token", word + " ")
+                yield sse("done", {"refused": False, "fallback": True, "citations": []})
+                return
+            refused = state.get("refused", False)
+            hits = [] if refused else state["hits"]
+            yield sse("sources", [source_json(i, h) for i, h in enumerate(hits, start=1)])
+            words = state["answer"].split(" ")
+            for i, word in enumerate(words):
+                yield sse("token", word if i == len(words) - 1 else word + " ")
+            yield sse(
+                "done",
+                {
+                    "refused": refused,
+                    "reason": state.get("reason"),
+                    "citations": state.get("citations", []),
+                    "model": state.get("model"),
+                },
+            )
 
+        log.info(
+            json.dumps(
+                {
+                    "event": "ask",
+                    "question_chars": len(req.question),
+                    "model": name,
+                    "refused": state.get("refused") if state else None,
+                    "reason": state.get("reason") if state else "fallback",
+                    "flags": state.get("flags") if state else None,
+                    "usage": state.get("usage") if state else None,
+                    "timings": state.get("timings") if state else None,
+                    "total_s": round(time.monotonic() - started, 3),
+                }
+            )
+        )
         return StreamingResponse(
             events(),
             media_type="text/event-stream",

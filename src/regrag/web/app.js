@@ -11,6 +11,7 @@ const STOP_ICON =
   '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor"/></svg>';
 
 let controller = null; // AbortController of the request in flight
+let msgCount = 0; // gives each answer's source cards unique ids for [n] links
 
 // ---- health badge ---------------------------------------------------------
 async function checkHealth() {
@@ -19,7 +20,7 @@ async function checkHealth() {
     const res = await fetch("/health");
     const h = await res.json();
     el.className = "status ok";
-    el.querySelector(".status-text").textContent = `Ready · ${h.retriever}`;
+    el.querySelector(".status-text").textContent = `Ready · ${h.model.replace(/^.*\//, "")}`;
   } catch {
     el.className = "status down";
     el.querySelector(".status-text").textContent = "Offline";
@@ -35,7 +36,9 @@ function addUser(text) {
 
 function addBot() {
   thread.append($("#tpl-bot").content.cloneNode(true));
-  return thread.lastElementChild;
+  const msg = thread.lastElementChild;
+  msg.dataset.id = String(++msgCount);
+  return msg;
 }
 
 function renderSources(msg, sources) {
@@ -43,6 +46,7 @@ function renderSources(msg, sources) {
   for (const s of sources) {
     const li = document.createElement("li");
     li.className = "source";
+    li.id = `src-${msg.dataset.id}-${s.rank}`;
 
     const head = document.createElement("div");
     head.className = "source-head";
@@ -82,6 +86,35 @@ function renderSources(msg, sources) {
     list.append(li);
   }
   msg.querySelector(".sources").hidden = sources.length === 0;
+}
+
+// After the answer is complete: turn "[2]" into a link to source card 2, highlight the
+// cards the answer cites and dim the ones it does not.
+function linkCitations(msg, answer, citations) {
+  const cited = new Set(citations.map((c) => c.n));
+  const text = answer.textContent;
+  answer.textContent = "";
+  for (const part of text.split(/(\[\d+\])/)) {
+    const m = part.match(/^\[(\d+)\]$/);
+    if (!m || !cited.has(Number(m[1]))) { answer.append(part); continue; }
+    const a = document.createElement("a");
+    a.className = "cite-mark";
+    a.href = `#src-${msg.dataset.id}-${m[1]}`;
+    a.textContent = m[1];
+    a.setAttribute("aria-label", `Source ${m[1]}`);
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      const card = document.getElementById(a.hash.slice(1));
+      card.classList.add("open", "flash");
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => card.classList.remove("flash"), 1200);
+    });
+    answer.append(a);
+  }
+  msg.querySelectorAll(".source").forEach((li, i) => {
+    li.classList.add(cited.has(i + 1) ? "cited" : "uncited");
+  });
+  if (cited.size) msg.querySelector(".sources h3").textContent = `Sources · ${cited.size} cited`;
 }
 
 // Pin the new question under the top bar; the answer then fills in below it.
@@ -131,13 +164,21 @@ async function ask(question) {
       body: JSON.stringify({ question }),
       signal: controller.signal,
     });
-    if (!res.ok) throw new Error(res.status === 422 ? "Please ask a longer question." : `Server error (${res.status}).`);
+    if (!res.ok) {
+      if (res.status === 422) throw new Error("Please ask a longer question.");
+      if (res.status === 429) throw new Error((await res.json()).detail);
+      throw new Error(`Server error (${res.status}).`);
+    }
 
     for await (const { event, data } of readEvents(res)) {
       if (event === "sources") renderSources(msg, data);
       else if (event === "token") {
         if (!started) { answer.textContent = ""; started = true; }
         answer.textContent += data;
+      } else if (event === "done") {
+        if (data.refused) answer.classList.add("refused");
+        else if (data.fallback) answer.classList.add("notice");
+        else linkCitations(msg, answer, data.citations);
       } else if (event === "error") throw new Error(data.message);
     }
   } catch (err) {
