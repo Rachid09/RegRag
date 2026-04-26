@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.8"
+      - run: uv sync --frozen
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - name: Download the ObliQA data (pinned commits, SHA-256 checked)
+        run: uv run python -m regrag.download
+      - name: Tests, including the offline BM25 retrieval regression
+        run: uv run pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t regrag .

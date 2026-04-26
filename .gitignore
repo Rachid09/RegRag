@@ -6,3 +6,8 @@ __pycache__/
 .env
 data/
 .DS_Store
+
+# generated eval outputs and working notes (kept locally, not part of the repo)
+reports/
+docs/
+.claude/

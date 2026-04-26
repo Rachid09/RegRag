@@ -3,7 +3,7 @@
 Point ids are UUID5 of the chunk id, so re-indexing overwrites the same points instead of
 duplicating them. The payload carries everything needed to cite and display a hit
 (DocumentID, PassageID, window, raw text, title, headings), so retrieval never has to go
-back to the JSON files. BM25 and fusion live in Python (decision 11), not in Qdrant.
+back to the JSON files. BM25 and fusion live in Python, not in Qdrant.
 """
 
 import sys

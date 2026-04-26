@@ -132,12 +132,9 @@ def build_graph(search: Callable[[str], list[Hit]], llm: LLM):
             "completion_tokens": out.completion_tokens,
             "cached": out.cached,
         }
-        return {
-            "answer": out.text,
-            "model": out.model,
-            "usage": usage,
-            "timings": timed("generate", state, start),
-        }
+        timings = timed("generate", state, start)
+        timings["llm_seconds"] = out.seconds  # original provider latency, even when cached
+        return {"answer": out.text, "model": out.model, "usage": usage, "timings": timings}
 
     def verify(state: State) -> dict:
         text = state["answer"].strip()

@@ -28,7 +28,7 @@ class Completion:
     prompt_tokens: int
     completion_tokens: int
     cached: bool
-    seconds: float
+    seconds: float  # provider latency of the original call (kept in the cache for reports)
 
 
 def is_transient(exc: BaseException) -> bool:
@@ -62,7 +62,9 @@ class LLM:
         key = cache_key("chat", {"model": self.model, "messages": messages})
         hit = self.cache.get(key)
         if hit is not None:
-            return Completion(hit["text"], self.model, hit["pt"], hit["ct"], True, 0.0)
+            return Completion(
+                hit["text"], self.model, hit["pt"], hit["ct"], True, hit.get("s", 0.0)
+            )
 
         @retry(
             retry=retry_if_exception(is_transient),
@@ -82,7 +84,7 @@ class LLM:
                 raise QuotaExhausted(str(exc)[:300]) from exc
             raise
         seconds = time.monotonic() - start
-        self.cache.set(key, {"text": text, "pt": pt, "ct": ct})
+        self.cache.set(key, {"text": text, "pt": pt, "ct": ct, "s": round(seconds, 3)})
         return Completion(text, self.model, pt, ct, False, seconds)
 
 
