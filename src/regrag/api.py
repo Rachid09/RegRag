@@ -62,7 +62,7 @@ def source_json(rank: int, h: Hit) -> dict:
 
 
 def make_search(name: str) -> Search:
-    """Build the retriever once at startup (BM25 takes ~10 s to index the corpus)."""
+    """Build the retriever once at startup (BM25 indexes the corpus in about a second)."""
     from regrag.bm25 import build_bm25
 
     bm25 = build_bm25()

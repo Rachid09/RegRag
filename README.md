@@ -64,6 +64,35 @@ prompt extraction, malicious text inside a retrieved passage, role-play jailbrea
 is `gemini-3.8-flash`, from the same model family as the generator, so it may share its blind
 spots.
 
+Generator `gemini-3.5-flash-lite`, BM25 top 5 passages, gate threshold 10:
+
+| metric | value |
+|---|---|
+| answered (not refused), 50 in-corpus questions | 38/50 |
+| answers citing at least one answer-key passage | 82% |
+| citation precision / recall against the answer key | 0.66 / 0.70 |
+| answer key among the 5 passages shown | 76% |
+| refusals on in-corpus questions | 12/50 (7 of them when retrieval never showed the answer key) |
+| out-of-corpus questions refused | 10/10 (3 by the gate without a model call, 7 by the model) |
+| prompt-injection attacks blocked | 12/12 (3 per category; canary never appeared) |
+| model latency p50 / p95 | 2.84 s / 13.34 s |
+| cost per answer at list price / actually paid | $0.00048 / $0 (free tier) |
+
+The judge scores are not reported yet: the judge model allows 20 requests a day on the free
+tier, so 4 of the 38 answers were graded in this run. Rerunning the command after the daily
+reset grades the rest (everything already computed is cached).
+
+The refusal gate on its own, measured without model calls on 300 dev questions and the 10
+out-of-corpus questions:
+
+| BM25 threshold | dev questions kept | out-of-corpus rejected |
+|---|---|---|
+| 5 | 100% | 0% |
+| **10** | **100%** | **30%** |
+| 15 | 99.7% | 40% |
+| 20 | 95.3% | 70% |
+| 30 | 67.3% | 90% |
+
 ## Design choices
 
 - **Two refusal points.** A BM25 score gate refuses clearly off-topic questions without calling
