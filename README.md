@@ -42,11 +42,11 @@ overlapping 1,500-word windows (13,040 chunks) → BM25 index in memory. Dense e
 
 ### Retrieval: 300 test questions (seed 42)
 
-| method | Recall@1 | Recall@5 | Recall@10 | Recall@20 | MRR@20 |
-|---|---|---|---|---|---|
+| method                                             | Recall@1  | Recall@5  | Recall@10 | Recall@20 | MRR@20    |
+| -------------------------------------------------- | --------- | --------- | --------- | --------- | --------- |
 | **BM25** (title + headings + text, k1 1.5, b 0.75) | **0.507** | **0.675** | **0.733** | **0.776** | **0.672** |
-| Dense, nomic-embed-text (local, 768 dims) | 0.304 | 0.520 | 0.589 | 0.651 | 0.459 |
-| Hybrid, Reciprocal Rank Fusion (k = 60) | 0.418 | 0.638 | 0.707 | 0.768 | 0.582 |
+| Dense, nomic-embed-text (local, 768 dims)          | 0.304     | 0.520     | 0.589     | 0.651     | 0.459     |
+| Hybrid, Reciprocal Rank Fusion (k = 60)            | 0.418     | 0.638     | 0.707     | 0.768     | 0.582     |
 
 Keyword search wins on this dataset. Per question, the answer key is in the top 20 for both
 BM25 and dense on 206 questions, only BM25 on 51, only dense on 7, and neither on 36. ObliQA's
@@ -58,7 +58,7 @@ numbers such as `3.2.1` and markers such as `(a)` as single tokens.
 ### Answers, refusals and prompt injection
 
 `uv run python -m regrag.eval_answers` scores 50 test questions (citation precision and recall,
-false refusals, an LLM judge for *correct* and *grounded*), 10 hand-written out-of-corpus
+false refusals, an LLM judge for _correct_ and _grounded_), 10 hand-written out-of-corpus
 questions, and 12 prompt-injection attacks in four categories (instruction override, system
 prompt extraction, malicious text inside a retrieved passage, role-play jailbreaks). The judge
 is `gemini-3.8-flash`, from the same model family as the generator, so it may share its blind
@@ -66,17 +66,17 @@ spots.
 
 Generator `gemini-3.5-flash-lite`, BM25 top 5 passages, gate threshold 10:
 
-| metric | value |
-|---|---|
-| answered (not refused), 50 in-corpus questions | 38/50 |
-| answers citing at least one answer-key passage | 82% |
-| citation precision / recall against the answer key | 0.66 / 0.70 |
-| answer key among the 5 passages shown | 76% |
-| refusals on in-corpus questions | 12/50 (7 of them when retrieval never showed the answer key) |
-| out-of-corpus questions refused | 10/10 (3 by the gate without a model call, 7 by the model) |
-| prompt-injection attacks blocked | 12/12 (3 per category; canary never appeared) |
-| model latency p50 / p95 | 2.84 s / 13.34 s |
-| cost per answer at list price / actually paid | $0.00048 / $0 (free tier) |
+| metric                                             | value                                                        |
+| -------------------------------------------------- | ------------------------------------------------------------ |
+| answered (not refused), 50 in-corpus questions     | 38/50                                                        |
+| answers citing at least one answer-key passage     | 82%                                                          |
+| citation precision / recall against the answer key | 0.66 / 0.70                                                  |
+| answer key among the 5 passages shown              | 76%                                                          |
+| refusals on in-corpus questions                    | 12/50 (7 of them when retrieval never showed the answer key) |
+| out-of-corpus questions refused                    | 10/10 (3 by the gate without a model call, 7 by the model)   |
+| prompt-injection attacks blocked                   | 12/12 (3 per category; canary never appeared)                |
+| model latency p50 / p95                            | 2.84 s / 13.34 s                                             |
+| cost per answer at list price / actually paid      | $0.00048 / $0 (free tier)                                    |
 
 The judge scores are not reported yet: the judge model allows 20 requests a day on the free
 tier, so 4 of the 38 answers were graded in this run. Rerunning the command after the daily
@@ -86,12 +86,12 @@ The refusal gate on its own, measured without model calls on 300 dev questions a
 out-of-corpus questions:
 
 | BM25 threshold | dev questions kept | out-of-corpus rejected |
-|---|---|---|
-| 5 | 100% | 0% |
-| **10** | **100%** | **30%** |
-| 15 | 99.7% | 40% |
-| 20 | 95.3% | 70% |
-| 30 | 67.3% | 90% |
+| -------------- | ------------------ | ---------------------- |
+| 5              | 100%               | 0%                     |
+| **10**         | **100%**           | **30%**                |
+| 15             | 99.7%              | 40%                    |
+| 20             | 95.3%              | 70%                    |
+| 30             | 67.3%              | 90%                    |
 
 ## Design choices
 
@@ -118,7 +118,7 @@ Requirements: Python 3.12 with [uv](https://docs.astral.sh/uv/), a Gemini API ke
 cp .env.example .env                       # add GEMINI_API_KEY
 uv sync
 uv run python -m regrag.download           # ObliQA data, pinned and checksummed (~43 MB)
-uv run uvicorn regrag.api:create_app --factory --port 8000
+uv run uvicorn regrag.api:create_app --factory --port 8004
 # open http://localhost:8000
 ```
 
@@ -134,12 +134,12 @@ Inside Information?"`.
 
 ## Reproduce the numbers
 
-| what | command | API calls |
-|---|---|---|
-| dataset statistics | `uv run python -m regrag.stats` | none |
-| BM25 retrieval | `uv run python -m regrag.eval_retrieval --method bm25` | none |
+| what                           | command                                                                                                                                                                                                        | API calls                                    |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| dataset statistics             | `uv run python -m regrag.stats`                                                                                                                                                                                | none                                         |
+| BM25 retrieval                 | `uv run python -m regrag.eval_retrieval --method bm25`                                                                                                                                                         | none                                         |
 | dense and hybrid (local model) | `docker compose up -d`, then `uv run python -m regrag.store --local-model nomic-embed-text` and `uv run python -m regrag.eval_retrieval --method dense --local-model nomic-embed-text` (and `--method hybrid`) | none (Ollama on CPU, several hours to embed) |
-| answers, refusals, injection | `uv run python -m regrag.eval_answers` | Gemini free tier, cached |
+| answers, refusals, injection   | `uv run python -m regrag.eval_answers`                                                                                                                                                                         | Gemini free tier, cached                     |
 
 CI runs ruff, the unit tests and a regression test that re-runs the BM25 evaluation and
 compares it with the table above to 12 decimal places.
